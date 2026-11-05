@@ -112,7 +112,7 @@ load_sprite:
         PUSH    AX
         PUSH    DX
         PUSH    BX
-        PUSH    DX
+        PUSH    CX
         PUSH    DI
 
         ; Openning the file
@@ -123,7 +123,7 @@ load_sprite:
         JC      open_file_err   ; The carry flag is set if error
         MOV     [file_handler], AX
 
-        ; Reading the offset of the raw bytes (as in the bmp header format)
+        ; Reading the offset of the pixel data (as in the bmp header format)
         MOV     AH, 42H         ; Move file pointer
         MOV     AL, 00H         ; Move from the start of the file
         MOV     BX, [file_handler]
@@ -140,20 +140,41 @@ load_sprite:
         JC      read_file_err
 
         ; Moving the file pointer to the actual raw data (pixel data) offset
-        MOV     AH, 42H         ; Move file pointer
-        MOV     AL, 00H         ; Move from the start of the file
+        MOV     AH, 42H                 ; Move file pointer
+        MOV     AL, 00H                 ; Move from the start of the file
         MOV     BX, [file_handler]
         MOV     DX, [file_offset]       ; Low word of the offset
         MOV     CX, [file_offset + 2]   ; Hight word of the offset
         INT     21H
         JC      pointer_move_err
 
-        MOV     AH, 3FH
-        MOV     BX, [file_handler]
-        MOV     CX, 64000
-        MOV     DX, bg_sprite
-        INT     21H
-        JC      read_file_err
+        ; Reading the sprite (from bottom to top beacuse of the bmp format)
+        ; bmp stores on the inverted order
+
+        ; Initializing the dst (last row of the buffer)
+        MOV     AX, [BP + 4]            ; sprite height
+        DEC     AX                      ; AX = height - 1
+        MOV     CX, [BP + 6]            ; sprite width
+        MUL     CX
+        ADD     AX, [BP + 8]            ; buffer addr
+        MOV     DI, AX                  ; dst index: buffers last row
+
+        ; Reading the file line by line
+        MOV     CX, [BP + 4]           ; Number of rows
+        load_sprite_l1:
+                PUSH    CX
+                MOV     AH, 3FH
+                MOV     BX, [file_handler]
+                MOV     CX, [BP + 6]            ; Sprite width (row size)
+                MOV     DX, DI
+                INT     21H
+                JC      read_file_err
+
+                SUB     DI, [BP + 6]            ; Go up one line
+
+                POP CX
+        LOOP    load_sprite_l1
+
 
         ; Closing the file
         MOV     AH, 3EH
@@ -172,16 +193,13 @@ load_sprite:
         load_sprite_exit:
         ; Retreiving context
         POP     DI
-        POP     DX
+        POP     CX
         POP     BX
         POP     DX
         POP     AX
         POPF
         POP     BP
         RET     8       ; 4 stack parameters
-
-
-
 ;-----------------------------------------------------------------------------
 segment stack stack
         resb 256
