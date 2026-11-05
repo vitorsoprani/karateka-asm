@@ -1,8 +1,14 @@
-EXTERN  load_sprite, show_bg    ; from SPRITE.ASM
+EXTERN  load_sprite, show_bg, show_sprite       ; from SPRITE.ASM
 
 segment data
         bg_filename:    DB      "..\IMAGES\BG.BMP", 0
+        p1life_filename:DB      "..\IMAGES\P1LIFE.BMP", 0
+        p2life_filename:DB      "..\IMAGES\P2LIFE.BMP", 0
+
         bg_sprite:      RESB    64000
+        p1life_sprite:  RESB    64
+        p2life_sprite:  RESB    64
+
         prev_mode:      DB      0
 
 segment code
@@ -32,11 +38,34 @@ segment code
         PUSH    WORD 320
         PUSH    WORD 200
         CALL    load_sprite
+
+        PUSH    WORD p1life_filename
+        PUSH    WORD p1life_sprite
+        PUSH    WORD 8
+        PUSH    WORD 8
+        CALL    load_sprite
+
+        PUSH    WORD p2life_filename
+        PUSH    WORD p2life_sprite
+        PUSH    WORD 8
+        PUSH    WORD 8
+        CALL    load_sprite
 ;-----------------------------------------------------------------------------
+
+;-- DRAWING ------------------------------------------------------------------
         PUSH    WORD bg_sprite
         CALL    show_bg
-        MOV     AH, 08H      
+
+        PUSH    WORD p1life_sprite
+        PUSH    WORD 8
+        PUSH    WORD 8
+        PUSH    WORD 0
+        PUSH    WORD 0
+        CALL    show_sprite
+
+        MOV     AH, 08H
         INT     21H
+;-----------------------------------------------------------------------------
 
 ;-- GRACEFUL EXIT ------------------------------------------------------------
         ; Set video mode back

@@ -1,12 +1,12 @@
-GLOBAL  load_sprite, show_bg
+GLOBAL  load_sprite, show_bg, show_sprite
 
 segment data
+        transparent:    EQU     0
         file_handler:   DW      0
         file_offset:    TIMES 4 DB 0
 
 segment code
-;-- FUNCTIONS ----------------------------------------------------------------
-; show_bg function:
+;-- show_bg function ---------------------------------------------------------
 ;       shows the background on the screen
 ; USAGE:
 ;       PUSH    bg_addr         (pointer to bg buffer)
@@ -45,8 +45,89 @@ show_bg:
         POPF
         POP     BP
         RET     2       ; 1 stack parameter
+;-----------------------------------------------------------------------------
 
-; load_sprite function:
+;-- show_sprite function -----------------------------------------------------
+;       shows a generic sprite in a given position on screen
+; USAGE:
+;       PUSH    sprite_addr     (pointer to sprite buffer)
+;       PUSH    width
+;       PUSH    height
+;       PUSH    x
+;       PUSH    y
+;       CALL    show_sprite
+;
+; RESTRICITIONS:
+;       - x >= 0
+;       - x + width < 320
+;       - y >= 0
+;       - y + height < 200
+show_sprite:
+        ; Saving context
+        PUSH    BP
+        MOV     BP, SP
+        PUSHF
+        PUSH    AX
+        PUSH    ES
+        PUSH    BX
+        PUSH    CX
+        PUSH    DX
+        PUSH    DI
+        PUSH    SI
+
+        ; Seting ES for video memory address
+        MOV     AX, 0A000H
+        MOV     ES, AX
+
+        ; Initial VRAM offset: DI = (y * 320) + x
+        MOV     AX, [BP + 4]    ; y coord (5th paramether)
+        MOV     BX, 320
+        MUL     BX
+        ADD     AX, [BP + 6]    ; DX:AX = (x * 320) + x (will never overflow AX)
+        MOV     DI, AX          ; DI = (x, y) on the video memory
+
+        ; Setting SI
+        MOV     SI, [BP + 12]   ; sprite address (1st parameter)
+
+        CLD                     ; left to ritgh (SI/DI operations)
+
+        MOV     CX, [BP + 8]    ; height, rows count
+        show_sprite_l1:
+                PUSH    CX
+
+                MOV     CX, [BP + 10]   ; width
+                show_sprite_l2:
+                        LODSB                   ; AL = [DS:SI] and SI = SI + 1
+                        CMP     AL, transparent
+                        JE      skip_pixel
+                        MOV     [ES:DI], AL     ; Draw pixel if its not transparent
+
+                        skip_pixel:
+                        INC     DI              ; Next pixel on screen
+                LOOP    show_sprite_l2
+
+                ; Go to the next row
+                MOV     AX, 320
+                SUB     AX, [BP + 10]   ; AX = 320 - width
+                ADD     DI, AX          ; Moves DI to the next row
+
+                POP     CX
+        LOOP    show_sprite_l1
+                                   
+        ; Retrieving context
+        POP     SI
+        POP     DI
+        POP     DX
+        POP     CX
+        POP     BX
+        POP     ES
+        POP     AX
+        POPF
+        POP     BP
+        RET     10       ; 5 stack parameter
+;-----------------------------------------------------------------------------
+
+;-- load_sprite function -----------------------------------------------------
 ;       load a sprite (in bmp format) from disk to memory converting it into
 ;       a raw buffer (on the correct order)
 ; USAGE:
