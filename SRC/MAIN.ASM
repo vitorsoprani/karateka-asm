@@ -1,9 +1,9 @@
 segment data
-        bg_sprite:
-        incbin  "..\IMAGES\BG.BMP", 54 + 1024   ; Skips 54 byts from header
-                                                ; and 1kB for color info
-                                                ; we only need thge raw bytes                                              
-        prev_mode:      RESB    1
+        bg_filename:    DB      "..\IMAGES\BG.BMP", 0
+        bg_sprite:      RESB    64000
+        prev_mode:      DB      0
+        file_handler:   DW      0
+        file_offset:    TIMES 4 DB 0
 
 segment code
 ..start:
@@ -24,6 +24,11 @@ segment code
         MOV     AH, 00H
         INT     10H
 ;-----------------------------------------------------------------------------
+        PUSH    WORD bg_filename
+        PUSH    WORD bg_sprite
+        PUSH    WORD 320
+        PUSH    WORD 200
+        CALL    load_sprite
 
         PUSH    WORD bg_sprite
         CALL    show_bg
@@ -85,7 +90,98 @@ show_bg:
         POP     AX
         POPF
         POP     BP
-        RET     2
+        RET     2       ; 1 stack parameter
+
+; load_sprite function:
+;       load a sprite (in bmp format) from disk to memory converting it into
+;       a raw buffer (on the correct order)
+; USAGE:
+;       PUSH    file_name       (pointer to the string file name)
+;       PUSH    buffer          (pointer to the buffer to store raw the bytes)
+;       PUSH    width           (image width)
+;       PUSH    height          (image height)
+;       CALL    load_sprite
+;
+; RESTRICITIONS:
+;       - the buffer size must be enough to store width * height bytes
+load_sprite:
+        ; Saving context
+        PUSH    BP
+        MOV     BP, SP
+        PUSHF
+        PUSH    AX
+        PUSH    DX
+        PUSH    BX
+        PUSH    DX
+        PUSH    DI
+
+        ; Openning the file
+        MOV     AH, 3DH         ; Open file DOS function
+        MOV     AL, 00H         ; Read Only mode
+        MOV     DX, [BP + 10]   ; File name (1st stack parameter)
+        INT     21H
+        JC      open_file_err   ; The carry flag is set if error
+        MOV     [file_handler], AX
+
+        ; Reading the offset of the raw bytes (as in the bmp header format)
+        MOV     AH, 42H         ; Move file pointer
+        MOV     AL, 00H         ; Move from the start of the file
+        MOV     BX, [file_handler]
+        XOR     CX, CX
+        MOV     DX, 0AH         ; See the bmp header format for reference
+        INT     21H
+        JC      pointer_move_err
+
+        MOV     AH, 3FH
+        MOV     BX, [file_handler]
+        MOV     CX, 4           ; the raw data offset is stored in 4 bytes
+        MOV     DX, file_offset
+        INT     21H
+        JC      read_file_err
+
+        ; Moving the file pointer to the actual raw data (pixel data) offset
+        MOV     AH, 42H         ; Move file pointer
+        MOV     AL, 00H         ; Move from the start of the file
+        MOV     BX, [file_handler]
+        MOV     DX, [file_offset]       ; Low word of the offset
+        MOV     CX, [file_offset + 2]   ; Hight word of the offset
+        INT     21H
+        JC      pointer_move_err
+
+        MOV     AH, 3FH
+        MOV     BX, [file_handler]
+        MOV     CX, 64000
+        MOV     DX, bg_sprite
+        INT     21H
+        JC      read_file_err
+
+        ; Closing the file
+        MOV     AH, 3EH
+        MOV     BX, [file_handler]
+        INT     21H
+        JC      close_file_err
+
+        JMP     load_sprite_exit        ; Normal exit
+
+        open_file_err:
+        pointer_move_err:
+        read_file_err:
+        close_file_err:
+        ; TODO: handle errors
+
+        load_sprite_exit:
+        ; Retreiving context
+        POP     DI
+        POP     DX
+        POP     BX
+        POP     DX
+        POP     AX
+        POPF
+        POP     BP
+        RET     8       ; 4 stack parameters
+
+
+
 ;-----------------------------------------------------------------------------
 segment stack stack
         resb 256
