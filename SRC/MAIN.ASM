@@ -70,17 +70,12 @@ show_bg:
         MOV     ES, AX
 
         MOV     SI, [BP + 4]    ; Get source buffer address from the stack
-        MOV     DI, 64000 - 320 ; Start from the last row beacuse the bmp
-                                ; format stores the image upside down
+        XOR     DI, DI          ; DI = 0
+
         CLD
-        MOV     CX, 200
-        show_bg_l1:
-                PUSH    CX
-                MOV     CX, 320
-                REP     MOVSB
-                SUB     DI, 320 * 2
-                POP     CX
-        LOOP    show_bg_l1
+        MOV     CX, 64000       ; Screen size
+        REP     MOVSB
+
 
         ; Retrieving context
         POP     CX
