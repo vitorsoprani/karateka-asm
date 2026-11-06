@@ -1,4 +1,4 @@
-GLOBAL  load_sprite, show_bg, show_sprite
+GLOBAL  load_sprite, show_bg, show_sprite, flip_screen
 
 segment data
         transparent:    EQU     0
@@ -7,16 +7,13 @@ segment data
 
 segment code
 ;-- show_bg function ---------------------------------------------------------
-;       shows the background on the screen
+;       shows the background on the screen or buffer
 ; USAGE:
+;       PUSH    dest_segment    (tmp buffer or screen)
 ;       PUSH    bg_segment      (new DS)
 ;       PUSH    bg_addr         (pointer to bg buffer)
 ;       CALL    show_bg
-;
-; RESTRICITIONS:
-;       - none
 show_bg:
-        ; Saving context
         PUSH    BP
         MOV     BP, SP
         PUSHF
@@ -27,8 +24,7 @@ show_bg:
         PUSH    DI
         PUSH    CX
 
-        ; Seting ES for video memory address
-        MOV     AX, 0A000H
+        MOV     AX, [BP + 8]    ; Dest segment
         MOV     ES, AX
 
         MOV     AX, [BP + 6]    ; Buffer segment
@@ -37,10 +33,9 @@ show_bg:
 
         XOR     DI, DI          ; DI = 0
         CLD
-        MOV     CX, 64000       ; Screen size
-        REP     MOVSB
+        MOV     CX, 32000       ; Screen size em words
+        REP     MOVSW           ; Faster than MOVSB
 
-        ; Retrieving context
         POP     CX
         POP     DI
         POP     SI
@@ -49,12 +44,12 @@ show_bg:
         POP     AX
         POPF
         POP     BP
-        RET     4       ; 2 stack parameters
+        RET     6       ; 3 stack parameters
 ;-----------------------------------------------------------------------------
 
 ;-- show_sprite function -----------------------------------------------------
-;       shows a generic sprite in a given position on screen
 ; USAGE:
+;       PUSH    dest_segment    (tmp buffer or screen)
 ;       PUSH    sprite_segment  (buffer segment)
 ;       PUSH    sprite_addr     (pointer to sprite buffer)
 ;       PUSH    width
@@ -62,14 +57,7 @@ show_bg:
 ;       PUSH    x
 ;       PUSH    y
 ;       CALL    show_sprite
-;
-; RESTRICITIONS:
-;       - x >= 0
-;       - x + width < 320
-;       - y >= 0
-;       - y + height < 200
 show_sprite:
-        ; Saving context
         PUSH    BP
         MOV     BP, SP
         PUSHF
@@ -82,48 +70,45 @@ show_sprite:
         PUSH    DI
         PUSH    SI
 
-        ; Seting ES for video memory address
-        MOV     AX, 0A000H
+        MOV     AX, [BP + 16]   ; dst segment
         MOV     ES, AX
 
-        ; Initial VRAM offset: DI = (y * 320) + x
+        ; Initial Dest offset: DI = (y * 320) + x
         MOV     AX, [BP + 4]    ; y coord
         MOV     BX, 320
         MUL     BX
-        ADD     AX, [BP + 6]    ; DX:AX = (x * 320) + x (will never overflow AX)
-        MOV     DI, AX          ; DI = (x, y) on the video memory
+        ADD     AX, [BP + 6]    ; x
+        MOV     DI, AX          
 
         ; Setting SI
-        MOV     AX, [BP + 14]   ; buffer segment
+        MOV     AX, [BP + 14]   ; dest_segment 
         MOV     DS, AX
-        MOV     SI, [BP + 12]   ; sprite address
+        MOV     SI, [BP + 12]   ; sprite_buffer 
 
-        CLD                     ; left to ritgh (SI/DI operations)
+        CLD                     
 
-        MOV     CX, [BP + 8]    ; height, rows count
+        MOV     CX, [BP + 8]    ; height
         show_sprite_l1:
                 PUSH    CX
 
                 MOV     CX, [BP + 10]   ; width
                 show_sprite_l2:
-                        LODSB                   ; AL = [DS:SI] and SI = SI + 1
+                        LODSB                   
                         CMP     AL, transparent
                         JE      skip_pixel
-                        MOV     [ES:DI], AL     ; Draw pixel if its not transparent
+                        MOV     [ES:DI], AL     
 
                         skip_pixel:
-                        INC     DI              ; Next pixel on screen
+                        INC     DI              
                 LOOP    show_sprite_l2
 
-                ; Go to the next row
                 MOV     AX, 320
-                SUB     AX, [BP + 10]   ; AX = 320 - width
-                ADD     DI, AX          ; Moves DI to the next row
+                SUB     AX, [BP + 10]   
+                ADD     DI, AX          
 
                 POP     CX
         LOOP    show_sprite_l1
                                    
-        ; Retrieving context
         POP     SI
         POP     DI
         POP     DX
@@ -134,7 +119,61 @@ show_sprite:
         POP     AX
         POPF
         POP     BP
-        RET     12       ; 6 stack parameter
+        RET     14       ; 7 stack parameters
+;-----------------------------------------------------------------------------
+
+;-- flip_screen function -----------------------------------------------------
+;       Waits for VGA vsync and copies the off-screen buffer to actual VRAM
+; USAGE:
+;       PUSH    buffer_segment
+;       PUSH    buffer_offset
+;       CALL    flip_screen
+flip_screen:
+        PUSH    BP
+        MOV     BP, SP
+        PUSHF
+        PUSH    AX
+        PUSH    CX
+        PUSH    DX
+        PUSH    SI
+        PUSH    DI
+        PUSH    DS
+        PUSH    ES
+
+        MOV     AX, 0A000H
+        MOV     ES, AX                  ; dst: VRAM
+
+        MOV     AX, [BP + 6]
+        MOV     DS, AX
+        MOV     SI, [BP + 4]            ; src: tmp buffer
+
+        ; --- VSYNC ---
+        MOV     DX, 03DAh
+wait_retrace_end:
+        IN      AL, DX
+        TEST    AL, 8
+        JNZ     wait_retrace_end
+wait_retrace_start:
+        IN      AL, DX
+        TEST    AL, 8
+        JZ      wait_retrace_start
+
+        ; --- Transfer ---
+        XOR     DI, DI
+        MOV     CX, 32000
+        CLD
+        REP     MOVSW
+
+        POP     ES
+        POP     DS
+        POP     DI
+        POP     SI
+        POP     DX
+        POP     CX
+        POP     AX
+        POPF
+        POP     BP
+        RET     4
 ;-----------------------------------------------------------------------------
 
 ;-- load_sprite function -----------------------------------------------------

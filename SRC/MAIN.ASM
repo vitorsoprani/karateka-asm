@@ -1,12 +1,15 @@
-EXTERN  load_sprite, show_bg, show_sprite       ; from SPRITE.ASM
+EXTERN  load_sprite, show_bg, show_sprite, flip_screen
 EXTERN set_clock_isr, set_key_isr, reset_clock_isr, reset_key_isr
 EXTERN p1_w, p1_a, p1_s, p1_d, p1_r, p1_t
 EXTERN p2_up, p2_left, p2_down, p2_right, p2_n, p2_m
-EXTERN sys_p, sys_q
+EXTERN sys_p, sys_q, sys_render_frame
 
 
 segment bg_data
         bg_sprite:      RESB    64000
+
+segment double_buffer_data
+        screen_buffer:  RESB    64000
         
 
 segment data
@@ -45,6 +48,7 @@ segment code
 ;-----------------------------------------------------------------------------
 
 ;-- SETTING ISRS--------------------------------------------------------------
+        CALL    set_clock_isr
         CALL    set_key_isr
 ;-----------------------------------------------------------------------------
 
@@ -88,10 +92,17 @@ segment code
 
 ;-- DRAWING ------------------------------------------------------------------
         main_loop:
+        ; Framerate enforcing
+        CMP     BYTE [sys_render_frame], 1
+        JNE     check_quit
+        MOV     BYTE [sys_render_frame], 0
+
+        PUSH    WORD double_buffer_data
         PUSH    WORD bg_data
         PUSH    WORD bg_sprite
         CALL    show_bg
 
+        PUSH    WORD double_buffer_data
         PUSH    WORD data
         PUSH    WORD p1life_sprite
         PUSH    WORD 8
@@ -100,6 +111,12 @@ segment code
         PUSH    WORD 0
         CALL    show_sprite
 
+        ; Wrinting to video memory
+        PUSH    WORD double_buffer_data
+        PUSH    WORD screen_buffer
+        CALL    flip_screen
+
+        check_quit:
         CMP     BYTE [sys_q], 1
         JE      quit_main_loop
         JMP     main_loop
@@ -114,6 +131,7 @@ segment code
         INT     10H
 
         ; Reseting ISRs
+        CALL    reset_clock_isr
         CALL    reset_key_isr
 
         MOV     AH, 4CH

@@ -2,6 +2,7 @@ GLOBAL set_clock_isr, set_key_isr, reset_clock_isr, reset_key_isr
 GLOBAL p1_w, p1_a, p1_s, p1_d, p1_r, p1_t
 GLOBAL p2_up, p2_left, p2_down, p2_right, p2_n, p2_m
 GLOBAL sys_p, sys_q
+GLOBAL sys_render_frame
 
 segment data
         clk_int         EQU     08h     ; Clk interruption number
@@ -41,8 +42,9 @@ segment data
         p2_m            DB      0
 
         ; systemm controls
-        sys_p           DB      0       ; Pause
-        sys_q           DB      0       ; Quit
+        sys_p               DB  0       ; Pause
+        sys_q               DB  0       ; Quit
+        sys_render_frame    DB  0
 
 segment code
 
@@ -118,6 +120,8 @@ clk_isr:
 
         MOV     AX, data
         MOV     DS, AX
+
+        MOV     byte [sys_render_frame], 1 
 
         INC     byte [ticks]
         CMP     byte [ticks], 18        ; 18hz clock, 18 clicks == 1s
