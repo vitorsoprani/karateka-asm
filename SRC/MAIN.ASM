@@ -1,5 +1,9 @@
 EXTERN  load_sprite, show_bg, show_sprite       ; from SPRITE.ASM
 
+segment bg_data
+        bg_sprite:      RESB    64000
+        
+
 segment data
         bg_filename:    DB      "..\IMAGES\BG.BMP", 0
         p1life_filename:DB      "..\IMAGES\P1LIFE.BMP", 0
@@ -7,7 +11,6 @@ segment data
         p1_filename:    DB      "..\IMAGES\P1.BMP", 0
         p2_filename:    DB      "..\IMAGES\P2.BMP", 0
 
-        bg_sprite:      RESB    64000
         p1_sprite:      RESB    4096
         p2_sprite:      RESB    4096
         p1life_sprite:  RESB    64
@@ -38,30 +41,35 @@ segment code
 
 ;-- LOADING SPRITES ----------------------------------------------------------
         PUSH    WORD bg_filename
+        PUSH    WORD bg_data
         PUSH    WORD bg_sprite
         PUSH    WORD 320
         PUSH    WORD 200
         CALL    load_sprite
 
         PUSH    WORD p1_filename
+        PUSH    WORD data
         PUSH    WORD p1_sprite
         PUSH    WORD 64
         PUSH    WORD 64
         CALL    load_sprite
 
         PUSH    WORD p1_filename
+        PUSH    WORD data
         PUSH    WORD p1_sprite
         PUSH    WORD 64
         PUSH    WORD 64
         CALL    load_sprite
 
         PUSH    WORD p1life_filename
+        PUSH    WORD data
         PUSH    WORD p1life_sprite
         PUSH    WORD 8
         PUSH    WORD 8
         CALL    load_sprite
 
         PUSH    WORD p2life_filename
+        PUSH    WORD data
         PUSH    WORD p2life_sprite
         PUSH    WORD 8
         PUSH    WORD 8
@@ -69,9 +77,11 @@ segment code
 ;-----------------------------------------------------------------------------
 
 ;-- DRAWING ------------------------------------------------------------------
+        PUSH    WORD bg_data
         PUSH    WORD bg_sprite
         CALL    show_bg
 
+        PUSH    WORD data
         PUSH    WORD p1life_sprite
         PUSH    WORD 8
         PUSH    WORD 8

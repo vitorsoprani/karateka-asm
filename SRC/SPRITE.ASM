@@ -9,6 +9,7 @@ segment code
 ;-- show_bg function ---------------------------------------------------------
 ;       shows the background on the screen
 ; USAGE:
+;       PUSH    bg_segment      (new DS)
 ;       PUSH    bg_addr         (pointer to bg buffer)
 ;       CALL    show_bg
 ;
@@ -20,6 +21,7 @@ show_bg:
         MOV     BP, SP
         PUSHF
         PUSH    AX
+        PUSH    DS
         PUSH    ES
         PUSH    SI
         PUSH    DI
@@ -29,9 +31,11 @@ show_bg:
         MOV     AX, 0A000H
         MOV     ES, AX
 
+        MOV     AX, [BP + 6]    ; Buffer segment
+        MOV     DS, AX
         MOV     SI, [BP + 4]    ; Get source buffer address from the stack
-        XOR     DI, DI          ; DI = 0
 
+        XOR     DI, DI          ; DI = 0
         CLD
         MOV     CX, 64000       ; Screen size
         REP     MOVSB
@@ -41,15 +45,17 @@ show_bg:
         POP     DI
         POP     SI
         POP     ES
+        POP     DS
         POP     AX
         POPF
         POP     BP
-        RET     2       ; 1 stack parameter
+        RET     4       ; 2 stack parameters
 ;-----------------------------------------------------------------------------
 
 ;-- show_sprite function -----------------------------------------------------
 ;       shows a generic sprite in a given position on screen
 ; USAGE:
+;       PUSH    sprite_segment  (buffer segment)
 ;       PUSH    sprite_addr     (pointer to sprite buffer)
 ;       PUSH    width
 ;       PUSH    height
@@ -68,6 +74,7 @@ show_sprite:
         MOV     BP, SP
         PUSHF
         PUSH    AX
+        PUSH    DS
         PUSH    ES
         PUSH    BX
         PUSH    CX
@@ -80,14 +87,16 @@ show_sprite:
         MOV     ES, AX
 
         ; Initial VRAM offset: DI = (y * 320) + x
-        MOV     AX, [BP + 4]    ; y coord (5th paramether)
+        MOV     AX, [BP + 4]    ; y coord
         MOV     BX, 320
         MUL     BX
         ADD     AX, [BP + 6]    ; DX:AX = (x * 320) + x (will never overflow AX)
         MOV     DI, AX          ; DI = (x, y) on the video memory
 
         ; Setting SI
-        MOV     SI, [BP + 12]   ; sprite address (1st parameter)
+        MOV     AX, [BP + 14]   ; buffer segment
+        MOV     DS, AX
+        MOV     SI, [BP + 12]   ; sprite address
 
         CLD                     ; left to ritgh (SI/DI operations)
 
@@ -121,10 +130,11 @@ show_sprite:
         POP     CX
         POP     BX
         POP     ES
+        POP     DS
         POP     AX
         POPF
         POP     BP
-        RET     10       ; 5 stack parameter
+        RET     12       ; 6 stack parameter
 ;-----------------------------------------------------------------------------
 
 ;-- load_sprite function -----------------------------------------------------
@@ -132,6 +142,7 @@ show_sprite:
 ;       a raw buffer (on the correct order)
 ; USAGE:
 ;       PUSH    file_name       (pointer to the string file name)
+;       PUSH    buffer_segment
 ;       PUSH    buffer          (pointer to the buffer to store raw the bytes)
 ;       PUSH    width           (image width)
 ;       PUSH    height          (image height)
@@ -149,11 +160,12 @@ load_sprite:
         PUSH    BX
         PUSH    CX
         PUSH    DI
+        PUSH    DS
 
         ; Openning the file
         MOV     AH, 3DH         ; Open file DOS function
         MOV     AL, 00H         ; Read Only mode
-        MOV     DX, [BP + 10]   ; File name (1st stack parameter)
+        MOV     DX, [BP + 12]   ; File name (1st stack parameter)
         INT     21H
         JC      open_file_err   ; The carry flag is set if error
         MOV     [file_handler], AX
@@ -196,10 +208,14 @@ load_sprite:
 
         ; Reading the file line by line
         MOV     CX, [BP + 4]           ; Number of rows
+        MOV     BX, [file_handler]     ; to avoid problems with DS changes
+
+        PUSH    DS
+        MOV     AX, [BP + 10]
+        MOV     DS, AX
         load_sprite_l1:
                 PUSH    CX
-                MOV     AH, 3FH
-                MOV     BX, [file_handler]
+                MOV     AH, 3FH                 ; Read file (row by row)
                 MOV     CX, [BP + 6]            ; Sprite width (row size)
                 MOV     DX, DI
                 INT     21H
@@ -209,6 +225,7 @@ load_sprite:
 
                 POP CX
         LOOP    load_sprite_l1
+        POP     DS
 
 
         ; Closing the file
@@ -227,6 +244,7 @@ load_sprite:
 
         load_sprite_exit:
         ; Retreiving context
+        POP     DS
         POP     DI
         POP     CX
         POP     BX
@@ -234,6 +252,6 @@ load_sprite:
         POP     AX
         POPF
         POP     BP
-        RET     8       ; 4 stack parameters
+        RET     10       ; 5 stack parameters
 ;-----------------------------------------------------------------------------
 
