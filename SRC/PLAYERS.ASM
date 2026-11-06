@@ -3,18 +3,18 @@ GLOBAL  p1_x, p1_y, p2_x, p2_y
 GLOBAL  p1_x_vel, p1_y_vel, p2_x_vel, p2_y_vel
 GLOBAL  p1_life, p2_life
 GLOBAL  move_p1, move_p2, draw_players
-GLOBAL  p1_punch, p2_punch, update_punches
-GLOBAL  p1punch_sprite, p2punch_sprite
+GLOBAL  p1_punch, p2_punch, p1_kick, p2_kick, update_attacks
+GLOBAL  p1punch_sprite, p2punch_sprite, p1kick_sprite, p2kick_sprite
 
 EXTERN  show_sprite
 EXTERN  p1_t, p2_m              ; Punch keys (ISRS.ASM)
+EXTERN  p1_r, p2_n              ; Kick keys  (ISRS.ASM)
 
 segment data
         ; -- Combat constants --
         PLAYER_W        EQU     60      ; Hurtbox width  (defender)
-        PUNCH_W         EQU     60      ; Hitbox width   (attacker's punch)
-        HITBOX_H        EQU     64      ; Box height (players and punch)
-        PUNCH_FRAMES    EQU     2       ; Frames the punch sprite stays visible
+        ATTACK_W        EQU     60      ; Hitbox width   (attacker: punch and kick)
+        ATTACK_FRAMES   EQU     2       ; Frames the punch/kick sprite stays visible
 
         ; -- Player 1 Variables --
         p1_x            DW      50      ; Initial X position
@@ -28,6 +28,9 @@ segment data
         p1punch_sprite  RESB    4096    ; 64x64 buffer (punch pose)
         p1_punch_timer  DB      0       ; Frames left showing the punch sprite
         p1_punch_lock   DB      0       ; 1 = key still held (no auto-repeat)
+        p1kick_sprite   RESB    4096    ; 64x64 buffer (kick pose)
+        p1_kick_timer   DB      0       ; Frames left showing the kick sprite
+        p1_kick_lock    DB      0       ; 1 = key still held (no auto-repeat)
 
         ; -- Player 2 Variables --
         p2_x            DW      200     ; Initial X position
@@ -41,6 +44,9 @@ segment data
         p2punch_sprite  RESB    4096    ; 64x64 buffer (punch pose)
         p2_punch_timer  DB      0
         p2_punch_lock   DB      0
+        p2kick_sprite   RESB    4096    ; 64x64 buffer (kick pose)
+        p2_kick_timer   DB      0
+        p2_kick_lock    DB      0
 
 segment code
 ;-- move_p1 function ---------------------------------------------------------
@@ -99,46 +105,49 @@ move_p2:
         RET
 ;-----------------------------------------------------------------------------
 
-;-- punch_collides function ---------------------------------------------------
-;   Checks if p1 and p2 collide (horizontally)
+;-- attack_collides function --------------------------------------------------
+;       Horizontal (x / width) overlap test between the attacker's hitbox and
+;       the defender's hurtbox. Shared by punches and kicks.
 ; USAGE:
 ;       PUSH    atk_x
 ;       PUSH    atk_w
 ;       PUSH    def_x
 ;       PUSH    def_w
-;       CALL    punch_collides
+;       CALL    attack_collides
 ; RETURN:
 ;       AX = 1 if the boxes overlap, 0 otherwise (AX is NOT preserved)
-punch_collides:
+attack_collides:
         PUSH    BP
         MOV     BP, SP
+
+        ; Stack layout: [BP+10]=atk_x  [BP+8]=atk_w  [BP+6]=def_x  [BP+4]=def_w
 
         ; atk_x < def_x + def_w ?
         MOV     AX, [BP + 6]            ; def_x
         ADD     AX, [BP + 4]            ; + def_w
         CMP     [BP + 10], AX           ; atk_x
-        JGE     pc_miss
+        JGE     ac_miss
 
         ; def_x < atk_x + atk_w ?
         MOV     AX, [BP + 10]           ; atk_x
         ADD     AX, [BP + 8]            ; + atk_w
-        CMP     [BP + 6], AX
-        JGE     pc_miss
+        CMP     [BP + 6], AX            ; def_x
+        JGE     ac_miss
 
         MOV     AX, 1
-        JMP     pc_exit
-pc_miss:
+        JMP     ac_exit
+ac_miss:
         XOR     AX, AX
-pc_exit:
+ac_exit:
         POP     BP
-        RET     8                      ; 4 stack parameters
+        RET     8                       ; 4 stack parameters
 ;-----------------------------------------------------------------------------
 
 ;-- p1_punch function --------------------------------------------------------
 ;       Player 1 punch. Call it when the punch key (T) is pressed.
-;       Ignored while the previous punch animation is running or while the key
-;       has not been released since the last punch (one key press = one punch).
-;       Starts the punch sprite and, if the punch box overlaps Player 2,
+;       Ignored while any attack animation (punch or kick) is running or while
+;       the key has not been released since the last punch (one press = one punch).
+;       Starts the punch sprite and, if the attack box overlaps Player 2,
 ;       removes one unit of Player 2's life.
 ; USAGE:
 ;       CALL    p1_punch
@@ -149,15 +158,17 @@ p1_punch:
         JNE     p1_punch_exit
         CMP     BYTE [p1_punch_timer], 0
         JNE     p1_punch_exit
+        CMP     BYTE [p1_kick_timer], 0       ; cannot punch during a kick
+        JNE     p1_punch_exit
 
         MOV     BYTE [p1_punch_lock], 1
-        MOV     BYTE [p1_punch_timer], PUNCH_FRAMES
+        MOV     BYTE [p1_punch_timer], ATTACK_FRAMES
 
         PUSH    WORD [p1_x]             ; atk_x
-        PUSH    WORD PUNCH_W            ; atk_w
+        PUSH    WORD ATTACK_W           ; atk_w
         PUSH    WORD [p2_x]             ; def_x
         PUSH    WORD PLAYER_W           ; def_w
-        CALL    punch_collides
+        CALL    attack_collides
         CMP     AX, 0
         JE      p1_punch_exit
 
@@ -171,7 +182,11 @@ p1_punch:
 ;-----------------------------------------------------------------------------
 
 ;-- p2_punch function --------------------------------------------------------
-;       Same as p1_punch, for Player 2 (key M) hitting Player 1.
+;       Player 2 punch. Call it when the punch key (M) is pressed.
+;       Ignored while any attack animation (punch or kick) is running or while
+;       the key has not been released since the last punch (one press = one punch).
+;       Starts the punch sprite and, if the attack box overlaps Player 1,
+;       removes one unit of Player 1's life.
 ; USAGE:
 ;       CALL    p2_punch
 p2_punch:
@@ -181,19 +196,21 @@ p2_punch:
         JNE     p2_punch_exit
         CMP     BYTE [p2_punch_timer], 0
         JNE     p2_punch_exit
+        CMP     BYTE [p2_kick_timer], 0       ; cannot punch during a kick
+        JNE     p2_punch_exit
 
         MOV     BYTE [p2_punch_lock], 1
-        MOV     BYTE [p2_punch_timer], PUNCH_FRAMES
+        MOV     BYTE [p2_punch_timer], ATTACK_FRAMES
 
         PUSH    WORD [p2_x]             ; atk_x
-        PUSH    WORD PUNCH_W            ; atk_w
+        PUSH    WORD ATTACK_W           ; atk_w
         PUSH    WORD [p1_x]             ; def_x
         PUSH    WORD PLAYER_W           ; def_w
-        CALL    punch_collides
+        CALL    attack_collides
         CMP     AX, 0
         JE      p2_punch_exit
 
-        CMP     WORD [p1_life], 0
+        CMP     WORD [p1_life], 0       ; never goes below zero
         JE      p2_punch_exit
         DEC     WORD [p1_life]
 
@@ -202,32 +219,131 @@ p2_punch:
         RET
 ;-----------------------------------------------------------------------------
 
-;-- update_punches function --------------------------------------------------
-;       Per-frame upkeep of the punch state. Call once per frame, AFTER
-;       draw_players (so the sprite is shown for exactly PUNCH_FRAMES frames).
-;         - counts down the punch sprite timers
-;         - releases the punch lock when the key is no longer pressed
+;-- p1_kick function --------------------------------------------------------
+;       Player 1 kick. Call it when the kick key (R) is pressed.
+;       Ignored while any attack animation (punch or kick) is running or while
+;       the key has not been released since the last kick (one press = one kick).
+;       Starts the kick sprite and, if the attack box overlaps Player 2,
+;       removes one unit of Player 2's life.
 ; USAGE:
-;       CALL    update_punches
-update_punches:
+;       CALL    p1_kick
+p1_kick:
+        PUSH    AX
+
+        CMP     BYTE [p1_kick_lock], 0
+        JNE     p1_kick_exit
+        CMP     BYTE [p1_kick_timer], 0
+        JNE     p1_kick_exit
+        CMP     BYTE [p1_punch_timer], 0       ; cannot kick during a punch
+        JNE     p1_kick_exit
+
+        MOV     BYTE [p1_kick_lock], 1
+        MOV     BYTE [p1_kick_timer], ATTACK_FRAMES
+
+        PUSH    WORD [p1_x]             ; atk_x
+        PUSH    WORD ATTACK_W           ; atk_w
+        PUSH    WORD [p2_x]             ; def_x
+        PUSH    WORD PLAYER_W           ; def_w
+        CALL    attack_collides
+        CMP     AX, 0
+        JE      p1_kick_exit
+
+        CMP     WORD [p2_life], 0       ; never goes below zero
+        JE      p1_kick_exit
+        DEC     WORD [p2_life]
+
+        p1_kick_exit:
+        POP     AX
+        RET
+;-----------------------------------------------------------------------------
+
+;-- p2_kick function --------------------------------------------------------
+;       Player 2 kick. Call it when the kick key (N) is pressed.
+;       Ignored while any attack animation (punch or kick) is running or while
+;       the key has not been released since the last kick (one press = one kick).
+;       Starts the kick sprite and, if the attack box overlaps Player 1,
+;       removes one unit of Player 1's life.
+; USAGE:
+;       CALL    p2_kick
+p2_kick:
+        PUSH    AX
+
+        CMP     BYTE [p2_kick_lock], 0
+        JNE     p2_kick_exit
+        CMP     BYTE [p2_kick_timer], 0
+        JNE     p2_kick_exit
+        CMP     BYTE [p2_punch_timer], 0       ; cannot kick during a punch
+        JNE     p2_kick_exit
+
+        MOV     BYTE [p2_kick_lock], 1
+        MOV     BYTE [p2_kick_timer], ATTACK_FRAMES
+
+        PUSH    WORD [p2_x]             ; atk_x
+        PUSH    WORD ATTACK_W           ; atk_w
+        PUSH    WORD [p1_x]             ; def_x
+        PUSH    WORD PLAYER_W           ; def_w
+        CALL    attack_collides
+        CMP     AX, 0
+        JE      p2_kick_exit
+
+        CMP     WORD [p1_life], 0       ; never goes below zero
+        JE      p2_kick_exit
+        DEC     WORD [p1_life]
+
+        p2_kick_exit:
+        POP     AX
+        RET
+;-----------------------------------------------------------------------------
+
+;-- update_attacks function --------------------------------------------------
+;       Per-frame upkeep of the attack state (punch and kick). Call once per
+;       frame, AFTER draw_players (so each sprite is shown for exactly
+;       ATTACK_FRAMES frames).
+;         - counts down the sprite timers
+;         - releases each lock when its key is no longer pressed
+; USAGE:
+;       CALL    update_attacks
+update_attacks:
+        ; --- Player 1 punch ---
         CMP     BYTE [p1_punch_timer], 0
-        JE      up_p1_key
+        JE      ua_p1_punch_key
         DEC     BYTE [p1_punch_timer]
-        up_p1_key:
+        ua_p1_punch_key:
         CMP     BYTE [p1_t], 0
-        JNE     up_p2_timer
+        JNE     ua_p1_kick
         MOV     BYTE [p1_punch_lock], 0
 
-        up_p2_timer:
+        ; --- Player 1 kick ---
+        ua_p1_kick:
+        CMP     BYTE [p1_kick_timer], 0
+        JE      ua_p1_kick_key
+        DEC     BYTE [p1_kick_timer]
+        ua_p1_kick_key:
+        CMP     BYTE [p1_r], 0
+        JNE     ua_p2_punch
+        MOV     BYTE [p1_kick_lock], 0
+
+        ; --- Player 2 punch ---
+        ua_p2_punch:
         CMP     BYTE [p2_punch_timer], 0
-        JE      up_p2_key
+        JE      ua_p2_punch_key
         DEC     BYTE [p2_punch_timer]
-        up_p2_key:
+        ua_p2_punch_key:
         CMP     BYTE [p2_m], 0
-        JNE     up_exit
+        JNE     ua_p2_kick
         MOV     BYTE [p2_punch_lock], 0
 
-        up_exit:
+        ; --- Player 2 kick ---
+        ua_p2_kick:
+        CMP     BYTE [p2_kick_timer], 0
+        JE      ua_p2_kick_key
+        DEC     BYTE [p2_kick_timer]
+        ua_p2_kick_key:
+        CMP     BYTE [p2_n], 0
+        JNE     ua_exit
+        MOV     BYTE [p2_kick_lock], 0
+
+        ua_exit:
         RET
 ;-----------------------------------------------------------------------------
 
@@ -248,11 +364,16 @@ draw_players:
 
         MOV     AX, [BP + 4]    ; Retrieves dest_segment from stack
 
-        ; --- Drawing Player 1 (punch pose while the punch timer is running) ---
+        ; --- Drawing Player 1 (punch/kick pose while its timer is running) ---
         MOV     DX, p1_sprite
         CMP     BYTE [p1_punch_timer], 0
-        JE      draw_p1_body
+        JE      draw_p1_check_kick
         MOV     DX, p1punch_sprite
+        JMP     draw_p1_body
+        draw_p1_check_kick:
+        CMP     BYTE [p1_kick_timer], 0
+        JE      draw_p1_body
+        MOV     DX, p1kick_sprite
         draw_p1_body:
         PUSH    AX              ; dest_segment
         PUSH    WORD data       ; sprite_segment 
@@ -263,11 +384,16 @@ draw_players:
         PUSH    WORD [p1_y]     ; y
         CALL    show_sprite
 
-        ; --- Drawing Player 2 (punch pose while the punch timer is running) ---
+        ; --- Drawing Player 2 (punch/kick pose while its timer is running) ---
         MOV     DX, p2_sprite
         CMP     BYTE [p2_punch_timer], 0
-        JE      draw_p2_body
+        JE      draw_p2_check_kick
         MOV     DX, p2punch_sprite
+        JMP     draw_p2_body
+        draw_p2_check_kick:
+        CMP     BYTE [p2_kick_timer], 0
+        JE      draw_p2_body
+        MOV     DX, p2kick_sprite
         draw_p2_body:
         PUSH    AX              ; dest_segment
         PUSH    WORD data       ; sprite_segment 

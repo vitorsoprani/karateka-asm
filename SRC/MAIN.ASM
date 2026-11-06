@@ -6,8 +6,8 @@ EXTERN sys_p, sys_q, sys_render_frame
 EXTERN p1_sprite, p2_sprite, p1life_sprite, p2life_sprite
 EXTERN p1_x_vel, p1_y_vel, p2_x_vel, p2_y_vel
 EXTERN move_p1, move_p2, draw_players
-EXTERN p1_punch, p2_punch, update_punches
-EXTERN p1punch_sprite, p2punch_sprite
+EXTERN p1_punch, p2_punch, p1_kick, p2_kick, update_attacks
+EXTERN p1punch_sprite, p2punch_sprite, p1kick_sprite, p2kick_sprite
 
 segment bg_data
         bg_sprite:      RESB    64000
@@ -24,6 +24,8 @@ segment data
         p2_filename:    DB      "..\IMAGES\P2.BMP", 0
         p1punch_filename:DB     "..\IMAGES\P1PUNCH.BMP", 0
         p2punch_filename:DB     "..\IMAGES\P2PUNCH.BMP", 0
+        p1kick_filename:DB      "..\IMAGES\P1KICK.BMP", 0
+        p2kick_filename:DB      "..\IMAGES\P2KICK.BMP", 0
 
         prev_mode:      DB      0
 
@@ -90,6 +92,20 @@ segment code
         PUSH    WORD 64
         CALL    load_sprite
 
+        PUSH    WORD p1kick_filename
+        PUSH    WORD data
+        PUSH    WORD p1kick_sprite
+        PUSH    WORD 64
+        PUSH    WORD 64
+        CALL    load_sprite
+
+        PUSH    WORD p2kick_filename
+        PUSH    WORD data
+        PUSH    WORD p2kick_sprite
+        PUSH    WORD 64
+        PUSH    WORD 64
+        CALL    load_sprite
+
         PUSH    WORD p1life_filename
         PUSH    WORD data
         PUSH    WORD p1life_sprite
@@ -109,7 +125,9 @@ segment code
         main_loop:
         ; Framerate enforcing
         CMP     BYTE [sys_render_frame], 1
-        JNE     check_quit
+        JE      run_frame
+        JMP     check_quit
+        run_frame:
         MOV     BYTE [sys_render_frame], 0
 
 
@@ -127,8 +145,13 @@ segment code
 
         check_p1_punch:
         CMP BYTE [p1_t], 1         ; Punch pressed?
-        JNE p2_input_processing
+        JNE check_p1_kick
         CALL p1_punch
+
+        check_p1_kick:
+        CMP BYTE [p1_r], 1         ; Kick pressed?
+        JNE p2_input_processing
+        CALL p1_kick
 
         p2_input_processing:
         ; Player 2 input Processing
@@ -145,8 +168,13 @@ segment code
 
         check_p2_punch:
         CMP BYTE [p2_m], 1         ; Punch pressed?
-        JNE update_positions
+        JNE check_p2_kick
         CALL p2_punch
+
+        check_p2_kick:
+        CMP BYTE [p2_n], 1         ; Kick pressed?
+        JNE update_positions
+        CALL p2_kick
 
         update_positions:
         CALL move_p1
@@ -160,7 +188,7 @@ segment code
        
         PUSH WORD double_buffer_data
         CALL draw_players 
-        CALL update_punches        ; Punch sprite timers / key release
+        CALL update_attacks        ; Punch/kick sprite timers / key release
 
         ; Wrinting to video memory
         PUSH    WORD double_buffer_data
