@@ -4,8 +4,12 @@ segment data
         bg_filename:    DB      "..\IMAGES\BG.BMP", 0
         p1life_filename:DB      "..\IMAGES\P1LIFE.BMP", 0
         p2life_filename:DB      "..\IMAGES\P2LIFE.BMP", 0
+        p1_filename:    DB      "..\IMAGES\P1.BMP", 0
+        p2_filename:    DB      "..\IMAGES\P2.BMP", 0
 
         bg_sprite:      RESB    64000
+        p1_sprite:      RESB    4096
+        p2_sprite:      RESB    4096
         p1life_sprite:  RESB    64
         p2life_sprite:  RESB    64
 
@@ -37,6 +41,18 @@ segment code
         PUSH    WORD bg_sprite
         PUSH    WORD 320
         PUSH    WORD 200
+        CALL    load_sprite
+
+        PUSH    WORD p1_filename
+        PUSH    WORD p1_sprite
+        PUSH    WORD 64
+        PUSH    WORD 64
+        CALL    load_sprite
+
+        PUSH    WORD p1_filename
+        PUSH    WORD p1_sprite
+        PUSH    WORD 64
+        PUSH    WORD 64
         CALL    load_sprite
 
         PUSH    WORD p1life_filename
