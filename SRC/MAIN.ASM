@@ -1,9 +1,11 @@
-EXTERN  load_sprite, show_bg, show_sprite, flip_screen
+EXTERN load_sprite, show_bg, show_sprite, flip_screen
 EXTERN set_clock_isr, set_key_isr, reset_clock_isr, reset_key_isr
 EXTERN p1_w, p1_a, p1_s, p1_d, p1_r, p1_t
 EXTERN p2_up, p2_left, p2_down, p2_right, p2_n, p2_m
 EXTERN sys_p, sys_q, sys_render_frame
-
+EXTERN p1_sprite, p2_sprite, p1life_sprite, p2life_sprite
+EXTERN p1_x_vel, p1_y_vel, p2_x_vel, p2_y_vel
+EXTERN move_p1, move_p2, draw_players
 
 segment bg_data
         bg_sprite:      RESB    64000
@@ -19,18 +21,13 @@ segment data
         p1_filename:    DB      "..\IMAGES\P1.BMP", 0
         p2_filename:    DB      "..\IMAGES\P2.BMP", 0
 
-        p1_sprite:      RESB    4096
-        p2_sprite:      RESB    4096
-        p1life_sprite:  RESB    64
-        p2life_sprite:  RESB    64
-
         prev_mode:      DB      0
 
 segment code
 ..start:
 ;-- INITIALIZING SEGMENTS ----------------------------------------------------
         MOV     AX, data
-        MOV     DS, AX
+        MOV     DS, AX           
         MOV     AX, stack
         MOV     SS, AX
         MOV     SP, stacktop
@@ -97,19 +94,31 @@ segment code
         JNE     check_quit
         MOV     BYTE [sys_render_frame], 0
 
+
+        ; Input Processing
+        MOV WORD [p1_x_vel], 0     ; Reset vel
+
+        CMP BYTE [p1_a], 1         ; Left pressed?
+        JNE check_p1_right
+        MOV WORD [p1_x_vel], -5    ; Move left
+
+        check_p1_right:
+        CMP BYTE [p1_d], 1         ; Right pressed?
+        JNE update_positions
+        MOV WORD [p1_x_vel], 5     ; Move right
+
+        update_positions:
+        CALL move_p1
+        CALL move_p2
+
+        ; Rendering
         PUSH    WORD double_buffer_data
         PUSH    WORD bg_data
         PUSH    WORD bg_sprite
         CALL    show_bg
-
-        PUSH    WORD double_buffer_data
-        PUSH    WORD data
-        PUSH    WORD p1life_sprite
-        PUSH    WORD 8
-        PUSH    WORD 8
-        PUSH    WORD 0
-        PUSH    WORD 0
-        CALL    show_sprite
+       
+        PUSH WORD double_buffer_data
+        CALL draw_players 
 
         ; Wrinting to video memory
         PUSH    WORD double_buffer_data
