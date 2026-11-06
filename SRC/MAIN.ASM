@@ -65,9 +65,9 @@ segment code
         PUSH    WORD 64
         CALL    load_sprite
 
-        PUSH    WORD p1_filename
+        PUSH    WORD p2_filename
         PUSH    WORD data
-        PUSH    WORD p1_sprite
+        PUSH    WORD p2_sprite
         PUSH    WORD 64
         PUSH    WORD 64
         CALL    load_sprite
@@ -95,7 +95,7 @@ segment code
         MOV     BYTE [sys_render_frame], 0
 
 
-        ; Input Processing
+        ; Player 1 input Processing
         MOV WORD [p1_x_vel], 0     ; Reset vel
 
         CMP BYTE [p1_a], 1         ; Left pressed?
@@ -104,8 +104,21 @@ segment code
 
         check_p1_right:
         CMP BYTE [p1_d], 1         ; Right pressed?
-        JNE update_positions
+        JNE p2_input_processing
         MOV WORD [p1_x_vel], 5     ; Move right
+
+        p2_input_processing:
+        ; Player 2 input Processing
+        MOV WORD [p2_x_vel], 0     ; Reset vel
+
+        CMP BYTE [p2_left], 1         ; Left pressed?
+        JNE check_p2_right
+        MOV WORD [p2_x_vel], -5    ; Move left
+
+        check_p2_right:
+        CMP BYTE [p2_right], 1         ; Right pressed?
+        JNE update_positions
+        MOV WORD [p2_x_vel], 5     ; Move right
 
         update_positions:
         CALL move_p1
