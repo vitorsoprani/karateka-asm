@@ -6,6 +6,8 @@ EXTERN sys_p, sys_q, sys_render_frame
 EXTERN p1_sprite, p2_sprite, p1life_sprite, p2life_sprite
 EXTERN p1_x_vel, p1_y_vel, p2_x_vel, p2_y_vel
 EXTERN move_p1, move_p2, draw_players
+EXTERN p1_punch, p2_punch, update_punches
+EXTERN p1punch_sprite, p2punch_sprite
 
 segment bg_data
         bg_sprite:      RESB    64000
@@ -20,6 +22,8 @@ segment data
         p2life_filename:DB      "..\IMAGES\P2LIFE.BMP", 0
         p1_filename:    DB      "..\IMAGES\P1.BMP", 0
         p2_filename:    DB      "..\IMAGES\P2.BMP", 0
+        p1punch_filename:DB     "..\IMAGES\P1PUNCH.BMP", 0
+        p2punch_filename:DB     "..\IMAGES\P2PUNCH.BMP", 0
 
         prev_mode:      DB      0
 
@@ -72,6 +76,20 @@ segment code
         PUSH    WORD 64
         CALL    load_sprite
 
+        PUSH    WORD p1punch_filename
+        PUSH    WORD data
+        PUSH    WORD p1punch_sprite
+        PUSH    WORD 64
+        PUSH    WORD 64
+        CALL    load_sprite
+
+        PUSH    WORD p2punch_filename
+        PUSH    WORD data
+        PUSH    WORD p2punch_sprite
+        PUSH    WORD 64
+        PUSH    WORD 64
+        CALL    load_sprite
+
         PUSH    WORD p1life_filename
         PUSH    WORD data
         PUSH    WORD p1life_sprite
@@ -104,8 +122,13 @@ segment code
 
         check_p1_right:
         CMP BYTE [p1_d], 1         ; Right pressed?
-        JNE p2_input_processing
+        JNE check_p1_punch
         MOV WORD [p1_x_vel], 5     ; Move right
+
+        check_p1_punch:
+        CMP BYTE [p1_t], 1         ; Punch pressed?
+        JNE p2_input_processing
+        CALL p1_punch
 
         p2_input_processing:
         ; Player 2 input Processing
@@ -117,8 +140,13 @@ segment code
 
         check_p2_right:
         CMP BYTE [p2_right], 1         ; Right pressed?
-        JNE update_positions
+        JNE check_p2_punch
         MOV WORD [p2_x_vel], 5     ; Move right
+
+        check_p2_punch:
+        CMP BYTE [p2_m], 1         ; Punch pressed?
+        JNE update_positions
+        CALL p2_punch
 
         update_positions:
         CALL move_p1
@@ -132,6 +160,7 @@ segment code
        
         PUSH WORD double_buffer_data
         CALL draw_players 
+        CALL update_punches        ; Punch sprite timers / key release
 
         ; Wrinting to video memory
         PUSH    WORD double_buffer_data
