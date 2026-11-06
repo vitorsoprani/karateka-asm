@@ -1,4 +1,9 @@
 EXTERN  load_sprite, show_bg, show_sprite       ; from SPRITE.ASM
+EXTERN set_clock_isr, set_key_isr, reset_clock_isr, reset_key_isr
+EXTERN p1_w, p1_a, p1_s, p1_d, p1_r, p1_t
+EXTERN p2_up, p2_left, p2_down, p2_right, p2_n, p2_m
+EXTERN sys_p, sys_q
+
 
 segment bg_data
         bg_sprite:      RESB    64000
@@ -39,6 +44,11 @@ segment code
         INT     10H
 ;-----------------------------------------------------------------------------
 
+;-- SETTING ISRS--------------------------------------------------------------
+        CALL    set_key_isr
+;-----------------------------------------------------------------------------
+
+
 ;-- LOADING SPRITES ----------------------------------------------------------
         PUSH    WORD bg_filename
         PUSH    WORD bg_data
@@ -77,6 +87,7 @@ segment code
 ;-----------------------------------------------------------------------------
 
 ;-- DRAWING ------------------------------------------------------------------
+        main_loop:
         PUSH    WORD bg_data
         PUSH    WORD bg_sprite
         CALL    show_bg
@@ -89,8 +100,11 @@ segment code
         PUSH    WORD 0
         CALL    show_sprite
 
-        MOV     AH, 08H
-        INT     21H
+        CMP     BYTE [sys_q], 1
+        JE      quit_main_loop
+        JMP     main_loop
+
+        quit_main_loop:
 ;-----------------------------------------------------------------------------
 
 ;-- GRACEFUL EXIT ------------------------------------------------------------
@@ -98,6 +112,9 @@ segment code
         MOV     AL, [prev_mode]
         MOV     AH, 00H
         INT     10H
+
+        ; Reseting ISRs
+        CALL    reset_key_isr
 
         MOV     AH, 4CH
         MOV     AL, 00H         ; Error code (no error)
