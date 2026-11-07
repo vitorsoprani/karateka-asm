@@ -1,13 +1,23 @@
+;=============================================================================
+; SPRITE.ASM
+;       Graphics routines for VGA mode 13h (320x200, 256 colors, 1 byte per
+;       pixel): sprite loading from BMP, background and sprite
+;       drawing, and the back buffer -> VRAM copy.
+;       Colors are raw palette indices (the BMP palette is not loaded), and
+;       index 0 is treated as transparent when drawing sprites.
+;=============================================================================
+
 GLOBAL  load_sprite, show_bg, show_sprite, flip_screen
 
 segment data
-        transparent:    EQU     0
-        file_handler:   DW      0
-        file_offset:    TIMES 4 DB 0
+        transparent:    EQU     0       ; Palette index skipped by show_sprite
+        file_handler:   DW      0       ; DOS handle of the BMP being read
+        file_offset:    TIMES 4 DB 0    ; 32-bit offset of the pixel data (BMP header)
 
 segment code
 ;-- show_bg function ---------------------------------------------------------
 ;       shows the background on the screen or buffer
+;       Copies a full 320x200 image (64000 bytes) with no transparency
 ; USAGE:
 ;       PUSH    dest_segment    (tmp buffer or screen)
 ;       PUSH    bg_segment      (new DS)
@@ -33,7 +43,7 @@ show_bg:
 
         XOR     DI, DI          ; DI = 0
         CLD
-        MOV     CX, 32000       ; Screen size em words
+        MOV     CX, 32000       ; 320 * 200 = 64000 bytes = 32000 words
         REP     MOVSW           ; Faster than MOVSB
 
         POP     CX
@@ -48,6 +58,12 @@ show_bg:
 ;-----------------------------------------------------------------------------
 
 ;-- show_sprite function -----------------------------------------------------
+;       Draws a width x height sprite with its top-left corner at (x, y).
+;       Pixels equal to 'transparent' are skipped, leaving whatever is already
+;       in the destination.
+; RESTRICTIONS:
+;       - no clipping: the sprite must lie entirely inside the 320x200 area,
+;         otherwise it wraps around or writes outside the buffer
 ; USAGE:
 ;       PUSH    dest_segment    (tmp buffer or screen)
 ;       PUSH    sprite_segment  (buffer segment)
@@ -80,13 +96,14 @@ show_sprite:
         ADD     AX, [BP + 6]    ; x
         MOV     DI, AX          
 
-        ; Setting SI
-        MOV     AX, [BP + 14]   ; dest_segment 
+        ; Source: DS:SI = sprite buffer
+        MOV     AX, [BP + 14]   ; sprite_segment
         MOV     DS, AX
         MOV     SI, [BP + 12]   ; sprite_buffer 
 
         CLD                     
 
+        ; Outer loop: one iteration per row / inner loop: one per pixel
         MOV     CX, [BP + 8]    ; height
         show_sprite_l1:
                 PUSH    CX
@@ -102,6 +119,8 @@ show_sprite:
                         INC     DI              
                 LOOP    show_sprite_l2
 
+                ; End of row: DI already advanced 'width' pixels, so skip the
+                ; remaining (320 - width) to reach the start of the next row
                 MOV     AX, 320
                 SUB     AX, [BP + 10]   
                 ADD     DI, AX          
@@ -124,6 +143,7 @@ show_sprite:
 
 ;-- flip_screen function -----------------------------------------------------
 ;       Waits for VGA vsync and copies the off-screen buffer to actual VRAM
+;       The buffer must hold a full frame (64000 bytes).
 ; USAGE:
 ;       PUSH    buffer_segment
 ;       PUSH    buffer_offset
@@ -148,6 +168,10 @@ flip_screen:
         MOV     SI, [BP + 4]            ; src: tmp buffer
 
         ; --- VSYNC ---
+        ; Bit 3 of the VGA status register (3DAh) is 1 while the vertical
+        ; retrace is in progress. Waiting for the end of any retrace in
+        ; progress and then for the start of the next one makes the copy start
+        ; exactly at the beginning of a retrace, avoiding tearing.
         MOV     DX, 03DAh
 wait_retrace_end:
         IN      AL, DX
@@ -158,7 +182,7 @@ wait_retrace_start:
         TEST    AL, 8
         JZ      wait_retrace_start
 
-        ; --- Transfer ---
+        ; --- Transfer (64000 bytes copied as 32000 words) ---
         XOR     DI, DI
         MOV     CX, 32000
         CLD
@@ -179,6 +203,8 @@ wait_retrace_start:
 ;-- load_sprite function -----------------------------------------------------
 ;       load a sprite (in bmp format) from disk to memory converting it into
 ;       a raw buffer (on the correct order)
+;       Expects an 8-bit (256 colors) BMP: one byte per pixel, which is what
+;       the VGA mode 13h buffers use. The BMP palette is ignored.
 ; USAGE:
 ;       PUSH    file_name       (pointer to the string file name)
 ;       PUSH    buffer_segment
@@ -187,8 +213,11 @@ wait_retrace_start:
 ;       PUSH    height          (image height)
 ;       CALL    load_sprite
 ;
-; RESTRICITIONS:
+; RESTRICTIONS:
 ;       - the buffer size must be enough to store width * height bytes
+;       - width must be a multiple of 4: BMP pads each row to a 4-byte
+;         boundary and this routine reads exactly 'width' bytes per row
+;       - errors are not handled yet (see the TODO below)
 load_sprite:
         ; Saving context
         PUSH    BP
@@ -201,7 +230,10 @@ load_sprite:
         PUSH    DI
         PUSH    DS
 
-        ; Openning the file
+        ; Stack layout: [BP+12]=file_name  [BP+10]=buffer_segment  [BP+8]=buffer
+        ;                [BP+6]=width       [BP+4]=height
+
+        ; Opening the file
         MOV     AH, 3DH         ; Open file DOS function
         MOV     AL, 00H         ; Read Only mode
         MOV     DX, [BP + 12]   ; File name (1st stack parameter)
@@ -214,7 +246,7 @@ load_sprite:
         MOV     AL, 00H         ; Move from the start of the file
         MOV     BX, [file_handler]
         XOR     CX, CX
-        MOV     DX, 0AH         ; See the bmp header format for reference
+        MOV     DX, 0AH         ; Offset 0Ah of the BMP header = where the pixel data starts
         INT     21H
         JC      pointer_move_err
 
@@ -230,14 +262,15 @@ load_sprite:
         MOV     AL, 00H                 ; Move from the start of the file
         MOV     BX, [file_handler]
         MOV     DX, [file_offset]       ; Low word of the offset
-        MOV     CX, [file_offset + 2]   ; Hight word of the offset
+        MOV     CX, [file_offset + 2]   ; High word of the offset
         INT     21H
         JC      pointer_move_err
 
-        ; Reading the sprite (from bottom to top beacuse of the bmp format)
-        ; bmp stores on the inverted order
+        ; Reading the sprite. BMP stores its rows bottom-up, so the first row
+        ; in the file is the LAST row of the buffer: DI starts there and goes
+        ; up one row at a time.
 
-        ; Initializing the dst (last row of the buffer)
+        ; Initializing the dst (last row of the buffer): buffer + (height - 1) * width
         MOV     AX, [BP + 4]            ; sprite height
         DEC     AX                      ; AX = height - 1
         MOV     CX, [BP + 6]            ; sprite width
@@ -249,6 +282,8 @@ load_sprite:
         MOV     CX, [BP + 4]           ; Number of rows
         MOV     BX, [file_handler]     ; to avoid problems with DS changes
 
+        ; DOS read (AH=3Fh) writes to DS:DX, so DS must point to the buffer
+        ; segment while reading (the file handle was already copied to BX)
         PUSH    DS
         MOV     AX, [BP + 10]
         MOV     DS, AX
@@ -256,7 +291,7 @@ load_sprite:
                 PUSH    CX
                 MOV     AH, 3FH                 ; Read file (row by row)
                 MOV     CX, [BP + 6]            ; Sprite width (row size)
-                MOV     DX, DI
+                MOV     DX, DI                  ; DS:DX = this row in the buffer
                 INT     21H
                 JC      read_file_err
 
@@ -279,7 +314,7 @@ load_sprite:
         pointer_move_err:
         read_file_err:
         close_file_err:
-        ; TODO: handle errors
+        ; TODO: handle errors (for now every error just jumps to the exit)
 
         load_sprite_exit:
         ; Retreiving context
@@ -293,4 +328,3 @@ load_sprite:
         POP     BP
         RET     10       ; 5 stack parameters
 ;-----------------------------------------------------------------------------
-

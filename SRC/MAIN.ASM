@@ -1,3 +1,14 @@
+;=============================================================================
+; MAIN.ASM
+;       Entry point and game loop.
+;         - sets VGA mode 13h (320x200, 256 colors) and hooks the clock and
+;           keyboard ISRs (ISRS.ASM)
+;         - loads every BMP sprite into memory (SPRITE.ASM)
+;         - runs the main loop once per clock tick:
+;               input -> movement -> render (back buffer) -> flip to VRAM
+;         - restores the video mode and the original ISRs before exiting
+;=============================================================================
+
 EXTERN load_sprite, show_bg, show_sprite, flip_screen
 EXTERN set_clock_isr, set_key_isr, reset_clock_isr, reset_key_isr
 EXTERN p1_w, p1_a, p1_s, p1_d, p1_r, p1_t
@@ -9,14 +20,20 @@ EXTERN move_p1, move_p2, draw_players
 EXTERN p1_punch, p2_punch, p1_kick, p2_kick, update_attacks
 EXTERN p1punch_sprite, p2punch_sprite, p1kick_sprite, p2kick_sprite
 
+; The 320x200 buffers (64000 bytes each) get their own segments so that the
+; 'data' segment (sprites, key flags and variables) stays within 64 KB.
 segment bg_data
-        bg_sprite:      RESB    64000
+        bg_sprite:      RESB    64000   ; Background image (BG.BMP)
 
 segment double_buffer_data
+        ; Back buffer: every frame is composed here and then copied to VRAM by
+        ; flip_screen. Callers use the SEGMENT (double_buffer_data) as the
+        ; destination and 'screen_buffer' as the offset inside it.
         screen_buffer:  RESB    64000
         
 
 segment data
+        ; Sprite files (null-terminated for DOS INT 21h).
         bg_filename:    DB      "..\IMAGES\BG.BMP", 0
         p1life_filename:DB      "..\IMAGES\P1LIFE.BMP", 0
         p2life_filename:DB      "..\IMAGES\P2LIFE.BMP", 0
@@ -27,6 +44,7 @@ segment data
         p1kick_filename:DB      "..\IMAGES\P1KICK.BMP", 0
         p2kick_filename:DB      "..\IMAGES\P2KICK.BMP", 0
 
+        ; Video mode active before the game started (restored on exit)
         prev_mode:      DB      0
 
 segment code
@@ -57,6 +75,11 @@ segment code
 
 
 ;-- LOADING SPRITES ----------------------------------------------------------
+        ; Every load_sprite call takes (see SPRITE.ASM):
+        ;       file name, destination segment, destination offset, width, height
+        ; The sprite buffers themselves are declared in PLAYERS.ASM.
+
+        ; Background (320x200, has its own segment)
         PUSH    WORD bg_filename
         PUSH    WORD bg_data
         PUSH    WORD bg_sprite
@@ -64,6 +87,7 @@ segment code
         PUSH    WORD 200
         CALL    load_sprite
 
+        ; Players, idle pose (64x64)
         PUSH    WORD p1_filename
         PUSH    WORD data
         PUSH    WORD p1_sprite
@@ -78,6 +102,7 @@ segment code
         PUSH    WORD 64
         CALL    load_sprite
 
+        ; Attack poses (64x64), shown while the attack timer is running
         PUSH    WORD p1punch_filename
         PUSH    WORD data
         PUSH    WORD p1punch_sprite
@@ -106,6 +131,7 @@ segment code
         PUSH    WORD 64
         CALL    load_sprite
 
+        ; Life icons (8x8), one is drawn per life unit
         PUSH    WORD p1life_filename
         PUSH    WORD data
         PUSH    WORD p1life_sprite
@@ -123,7 +149,9 @@ segment code
 
 ;-- DRAWING ------------------------------------------------------------------
         main_loop:
-        ; Framerate enforcing
+        ; Frame pacing: the clock ISR raises sys_render_frame on every tick
+        ; (~18.2 Hz). A frame only runs when the flag is set (and clears it);
+        ; otherwise the loop just polls the quit key.
         CMP     BYTE [sys_render_frame], 1
         JE      run_frame
         JMP     check_quit
@@ -131,7 +159,10 @@ segment code
         MOV     BYTE [sys_render_frame], 0
 
 
-        ; Player 1 input Processing
+        ; Player 1 input processing
+        ; The key flags (p1_a, p1_d, ...) are written by key_isr:
+        ; 1 = held, 0 = released. Velocity is in pixels per frame and is
+        ; applied later by move_p1.
         MOV WORD [p1_x_vel], 0     ; Reset vel
 
         CMP BYTE [p1_a], 1         ; Left pressed?
@@ -143,6 +174,8 @@ segment code
         JNE check_p1_punch
         MOV WORD [p1_x_vel], 5     ; Move right
 
+        ; Attacks: p1_punch / p1_kick ignore repeated calls (key lock + sprite
+        ; timer), so it is safe to call them on every frame the key is down.
         check_p1_punch:
         CMP BYTE [p1_t], 1         ; Punch pressed?
         JNE check_p1_kick
@@ -154,15 +187,15 @@ segment code
         CALL p1_kick
 
         p2_input_processing:
-        ; Player 2 input Processing
+        ; Player 2 input processing (same logic as Player 1)
         MOV WORD [p2_x_vel], 0     ; Reset vel
 
-        CMP BYTE [p2_left], 1         ; Left pressed?
+        CMP BYTE [p2_left], 1      ; Left pressed?
         JNE check_p2_right
         MOV WORD [p2_x_vel], -5    ; Move left
 
         check_p2_right:
-        CMP BYTE [p2_right], 1         ; Right pressed?
+        CMP BYTE [p2_right], 1     ; Right pressed?
         JNE check_p2_punch
         MOV WORD [p2_x_vel], 5     ; Move right
 
@@ -177,10 +210,12 @@ segment code
         CALL p2_kick
 
         update_positions:
+        ; Applies the velocities to the positions (X is bounds-checked inside)
         CALL move_p1
         CALL move_p2
 
-        ; Rendering
+        ; Rendering: everything is drawn into the back buffer, background first
+        ; and players on top, so the screen is only touched once (flip_screen)
         PUSH    WORD double_buffer_data
         PUSH    WORD bg_data
         PUSH    WORD bg_sprite
@@ -188,13 +223,16 @@ segment code
        
         PUSH WORD double_buffer_data
         CALL draw_players 
-        CALL update_attacks        ; Punch/kick sprite timers / key release
+        ; Must run after draw_players: counts down the attack sprite timers and
+        ; releases the attack locks of keys that are no longer held
+        CALL update_attacks
 
-        ; Wrinting to video memory
+        ; Copies the back buffer to video memory (waits for vertical retrace)
         PUSH    WORD double_buffer_data
         PUSH    WORD screen_buffer
         CALL    flip_screen
 
+        ; Quit key (Q) is polled even on iterations that skip the frame
         check_quit:
         CMP     BYTE [sys_q], 1
         JE      quit_main_loop
@@ -209,7 +247,7 @@ segment code
         MOV     AH, 00H
         INT     10H
 
-        ; Reseting ISRs
+        ; Restoring the original ISRs (must be done before returning to DOS)
         CALL    reset_clock_isr
         CALL    reset_key_isr
 

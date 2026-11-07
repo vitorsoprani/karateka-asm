@@ -1,3 +1,13 @@
+;=============================================================================
+; PLAYERS.ASM
+;       Player state and behavior: position, movement, life, punch/kick and
+;       rendering of both players with their life indicators.
+;       Attacks work as follows (see p*_punch / p*_kick / update_attacks):
+;         - one key press = one attack (a lock holds until the key is released)
+;         - the attack sprite stays visible for ATTACK_FRAMES frames
+;         - the hit test and the damage are resolved when the attack starts
+;=============================================================================
+
 GLOBAL  p1_sprite, p2_sprite, p1life_sprite, p2life_sprite
 GLOBAL  p1_x, p1_y, p2_x, p2_y
 GLOBAL  p1_x_vel, p1_y_vel, p2_x_vel, p2_y_vel
@@ -12,17 +22,21 @@ EXTERN  p1_r, p2_n              ; Kick keys  (ISRS.ASM)
 
 segment data
         ; -- Combat constants --
+        ; Collision is horizontal only: the Y axis is never tested
         PLAYER_W        EQU     60      ; Hurtbox width  (defender)
         ATTACK_W        EQU     60      ; Hitbox width   (attacker: punch and kick)
         ATTACK_FRAMES   EQU     2       ; Frames the punch/kick sprite stays visible
 
         ; -- Player 1 Variables --
+        ; x, y         = top-left corner of the sprite on screen (pixels)
+        ; x_vel, y_vel = displacement applied per frame by move_p1
         p1_x            DW      50      ; Initial X position
         p1_y            DW      100     ; Initial Y position (floor level)
         p1_x_vel        DW      0
         p1_y_vel        DW      0
         p1_life         DW      10      ; Initial life (10 units)
         
+        ; Sprite buffers are filled by load_sprite (MAIN.ASM) at startup
         p1_sprite       RESB    4096    ; 64x64 buffer
         p1life_sprite   RESB    64      ; 8x8 buffer
         p1punch_sprite  RESB    4096    ; 64x64 buffer (punch pose)
@@ -32,7 +46,7 @@ segment data
         p1_kick_timer   DB      0       ; Frames left showing the kick sprite
         p1_kick_lock    DB      0       ; 1 = key still held (no auto-repeat)
 
-        ; -- Player 2 Variables --
+        ; -- Player 2 Variables (same fields and meaning as Player 1) --
         p2_x            DW      200     ; Initial X position
         p2_y            DW      100     ; Initial Y position (floor level)
         p2_x_vel        DW      0
@@ -60,7 +74,9 @@ move_p1:
         MOV     AX, [p1_x]
         ADD     AX, [p1_x_vel]
         
-        ; Simple screen boundaries (0 to 320 - 64)
+        ; Screen boundaries: X must stay within 0..256 (320 - 64 sprite width).
+        ; A move that would leave this range is discarded entirely (no
+        ; clamping), so the player may stop a few pixels short of the edge.
         CMP     AX, 0
         JL      skip_p1_x
         CMP     AX, 256
@@ -68,7 +84,7 @@ move_p1:
         MOV     [p1_x], AX
 
         skip_p1_x:
-        ; Updating Y coordinate
+        ; Updating Y coordinate (no bounds check)
         MOV     AX, [p1_y]
         ADD     AX, [p1_y_vel]
         MOV     [p1_y], AX
@@ -88,7 +104,9 @@ move_p2:
         MOV     AX, [p2_x]
         ADD     AX, [p2_x_vel]
         
-        ; Simple screen boundaries (0 to 320 - 64)
+        ; Screen boundaries: X must stay within 0..256 (320 - 64 sprite width).
+        ; A move that would leave this range is discarded entirely (no
+        ; clamping), so the player may stop a few pixels short of the edge.
         CMP     AX, 0
         JL      skip_p2_x
         CMP     AX, 256
@@ -96,7 +114,7 @@ move_p2:
         MOV     [p2_x], AX
 
         skip_p2_x:
-        ; Updating Y coordinate
+        ; Updating Y coordinate (no bounds check)
         MOV     AX, [p2_y]
         ADD     AX, [p2_y_vel]
         MOV     [p2_y], AX
@@ -108,6 +126,9 @@ move_p2:
 ;-- attack_collides function --------------------------------------------------
 ;       Horizontal (x / width) overlap test between the attacker's hitbox and
 ;       the defender's hurtbox. Shared by punches and kicks.
+;       The boxes overlap when each one starts before the other one ends, so
+;       the test is symmetric: there is no facing direction (the attack
+;       reaches both sides) and the Y axis is ignored.
 ; USAGE:
 ;       PUSH    atk_x
 ;       PUSH    atk_w
@@ -154,6 +175,8 @@ ac_exit:
 p1_punch:
         PUSH    AX
 
+        ; Guards: ignored if the key was not released since the last punch,
+        ; if the punch sprite is still showing, or if a kick is in progress
         CMP     BYTE [p1_punch_lock], 0
         JNE     p1_punch_exit
         CMP     BYTE [p1_punch_timer], 0
@@ -161,6 +184,9 @@ p1_punch:
         CMP     BYTE [p1_kick_timer], 0       ; cannot punch during a kick
         JNE     p1_punch_exit
 
+        ; Attack accepted: lock until the key is released and start the sprite
+        ; timer (both happen even if the punch misses). The hit test and the
+        ; damage are resolved right now, on the frame the punch starts.
         MOV     BYTE [p1_punch_lock], 1
         MOV     BYTE [p1_punch_timer], ATTACK_FRAMES
 
@@ -192,6 +218,8 @@ p1_punch:
 p2_punch:
         PUSH    AX
 
+        ; Guards: ignored if the key was not released since the last punch,
+        ; if the punch sprite is still showing, or if a kick is in progress
         CMP     BYTE [p2_punch_lock], 0
         JNE     p2_punch_exit
         CMP     BYTE [p2_punch_timer], 0
@@ -199,6 +227,9 @@ p2_punch:
         CMP     BYTE [p2_kick_timer], 0       ; cannot punch during a kick
         JNE     p2_punch_exit
 
+        ; Attack accepted: lock until the key is released and start the sprite
+        ; timer (both happen even if the punch misses). The hit test and the
+        ; damage are resolved right now, on the frame the punch starts.
         MOV     BYTE [p2_punch_lock], 1
         MOV     BYTE [p2_punch_timer], ATTACK_FRAMES
 
@@ -230,6 +261,8 @@ p2_punch:
 p1_kick:
         PUSH    AX
 
+        ; Guards: ignored if the key was not released since the last kick,
+        ; if the kick sprite is still showing, or if a punch is in progress
         CMP     BYTE [p1_kick_lock], 0
         JNE     p1_kick_exit
         CMP     BYTE [p1_kick_timer], 0
@@ -237,6 +270,9 @@ p1_kick:
         CMP     BYTE [p1_punch_timer], 0       ; cannot kick during a punch
         JNE     p1_kick_exit
 
+        ; Attack accepted: lock until the key is released and start the sprite
+        ; timer (both happen even if the kick misses). The hit test and the
+        ; damage are resolved right now, on the frame the kick starts.
         MOV     BYTE [p1_kick_lock], 1
         MOV     BYTE [p1_kick_timer], ATTACK_FRAMES
 
@@ -268,6 +304,8 @@ p1_kick:
 p2_kick:
         PUSH    AX
 
+        ; Guards: ignored if the key was not released since the last kick,
+        ; if the kick sprite is still showing, or if a punch is in progress
         CMP     BYTE [p2_kick_lock], 0
         JNE     p2_kick_exit
         CMP     BYTE [p2_kick_timer], 0
@@ -275,6 +313,9 @@ p2_kick:
         CMP     BYTE [p2_punch_timer], 0       ; cannot kick during a punch
         JNE     p2_kick_exit
 
+        ; Attack accepted: lock until the key is released and start the sprite
+        ; timer (both happen even if the kick misses). The hit test and the
+        ; damage are resolved right now, on the frame the kick starts.
         MOV     BYTE [p2_kick_lock], 1
         MOV     BYTE [p2_kick_timer], ATTACK_FRAMES
 
@@ -362,8 +403,13 @@ draw_players:
         PUSH    CX
         PUSH    DX
 
-        MOV     AX, [BP + 4]    ; Retrieves dest_segment from stack
+        ; Retrieves dest_segment from stack. AX keeps it during the whole
+        ; function (show_sprite preserves the registers).
+        MOV     AX, [BP + 4]
 
+        ; Drawing order: Player 1, Player 2 (overlaps Player 1 when they
+        ; intersect), then the life icons.
+        ; DX = sprite to draw: idle by default, attack pose while its timer runs.
         ; --- Drawing Player 1 (punch/kick pose while its timer is running) ---
         MOV     DX, p1_sprite
         CMP     BYTE [p1_punch_timer], 0
@@ -406,6 +452,9 @@ draw_players:
 
 
         ; --- Drawing Player 1 Life (Bottom-Left) ---
+        ; One icon per life unit, 10 px apart (8 px icon + 2 px gap). Player 1
+        ; icons grow to the right from x=10; Player 2 icons are mirrored: they
+        ; start at x=302 (320 - 10 - 8) and grow to the left.
         MOV     CX, [p1_life]
         CMP     CX, 0
         JE      skip_p1_life    ; If life is 0, draw nothing
@@ -419,8 +468,8 @@ draw_players:
                 PUSH    WORD p1life_sprite  ; sprite_addr
                 PUSH    WORD 8              ; width
                 PUSH    WORD 8              ; height
-                PUSH    BX                  ; X dinâmico
-                PUSH    WORD 185            ; Y Fixo no inferior da tela
+                PUSH    BX                  ; X of the current icon
+                PUSH    WORD 185            ; Fixed Y (bottom of the screen)
                 CALL    show_sprite
 
                 ADD     BX, 10              ; padding to the next flag
@@ -444,8 +493,8 @@ draw_players:
                 PUSH    WORD p2life_sprite  ; sprite_addr
                 PUSH    WORD 8              ; width
                 PUSH    WORD 8              ; height
-                PUSH    BX                  ; X dinâmico
-                PUSH    WORD 185            ; Y Fixo no inferior da tela
+                PUSH    BX                  ; X of the current icon
+                PUSH    WORD 185            ; Fixed Y (bottom of the screen)
                 CALL    show_sprite
 
                 SUB     BX, 10
